@@ -20,15 +20,6 @@ module spi_front (
 
 );
 
-/**
-*8==================================================================================D
-*8==================================================================================D
-*8======================                                       =====================D
-*8====================       AXIS READ STREAM OUTPUT DRIVE       ===================D
-*8======================                                       =====================D
-*8==================================================================================D
-*8==================================================================================D
-*/
 
 localparam SPI_STATE_IDLE = 0;
 localparam SPI_STATE_ACTIVE = 1;
@@ -85,15 +76,6 @@ always @(negedge spi_clk_in or negedge rst_n) begin
     end
 end
 
-/*
-assign spi_mosi_o = (spi_bit_ptr == 3'h0)? spi_tx_data[7] :
-                    (spi_bit_ptr == 3'h1)? spi_tx_data[6] :
-                    (spi_bit_ptr == 3'h2)? spi_tx_data[5] :
-                    (spi_bit_ptr == 3'h3)? spi_tx_data[4] :
-                    (spi_bit_ptr == 3'h4)? spi_tx_data[3] :
-                    (spi_bit_ptr == 3'h5)? spi_tx_data[2] :
-                    (spi_bit_ptr == 3'h6)? spi_tx_data[1] :spi_tx_data[0];
-*/
 reg spi_mosi_r;
 assign spi_mosi_o = spi_mosi_r;
 always @(*) begin
