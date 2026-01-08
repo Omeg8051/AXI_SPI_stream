@@ -1,0 +1,541 @@
+//Host write and read simultaniously. remember to pop off extra bytes from the commands before reading.
+//Each mosi write will cause a byte from miso be pushed into miso fifo regardless of it's usefullness.
+
+//The circular buffer used for fifos WILL NOT STOP OVER FLOWS. Check each fifo's availability before writing data larger then it's capacity.
+
+//Physical writes will initiate as long as there is data in MOSI fifo
+
+//SPI clock is only enabled during tranfers.
+
+
+
+
+// MM interface:
+// <reg>:	W/R	name			description
+
+// reg0:	XX	reserved
+// reg1:	WR	mosi_miso_fifo	write to push LSB to spi MOSI queue read to pop one byte off MISO queue
+// reg2:	XX	reserved
+// reg3:	RW	chip_sel_reg	write to enable chip select. the bits that are 1s are selected 		
+
+//control status
+// reg4:	RO	host_status		display host status bit map: {above reserved,	read_buffer_full,	read_available,	write_buffer_full,	write_in_progress}
+// reg5:	RW	host_ctrl_a		control the host's behavior, the other configs will load on writing to this reg: {mm_or_strm[31]	,reserved[...],	clk_mosi_forced_en[1:1],	cs_output_en[0:0]}
+// reg6:	RW	host_ctrl_b		control the host's clock pre_scaler: {reserved,	pre_scaler[3:0]}
+// reg7:	XX	reserved	
+
+//fifo_size			64	in 2's power increment, please
+//fifo_size_bits	6	depends on fifo_size as (log(fifo_size)/log(2) + 1)
+
+module spi_host #
+	(
+		// Users to add parameters here
+		
+		parameter integer SPI_CS_WIDTH	= 16
+	) (
+	//spi interface
+	input wire spi_clk_i,
+	output wire spi_clk_o,
+	output wire spi_clk_t,
+	input wire spi_mosi_i,
+	output wire spi_mosi_o,
+	output wire spi_mosi_t,
+	input wire spi_miso_i,
+	output wire spi_miso_o,
+	output wire spi_miso_t,
+
+
+	//control_status interface
+	input axi_clk,
+	input rst_n,
+	input wact,
+	input ract,
+	input [7:0]reg_waddr,
+	input [7:0]reg_raddr,
+	output [REG_DATA_WIDTH - 1:0]reg_rd,
+	input [REG_DATA_WIDTH - 1:0]reg_wr,
+	output axi_ready,
+
+	//axi stream
+	input axis_clk,
+	input axis_valid,
+	output axis_ready,
+	input [31:0]axis_data,//lsb transfered first
+	//input [3:0]axis_strb,//no interleaved byte enable
+
+	//axi read stream
+	input axis_rclk,
+	output axis_rvalid,
+	output axis_rlast,
+	input axis_rready,
+	output [31:0]axis_rdata,//lsb transfered first
+	
+
+	//chip sel
+	input [SPI_CS_WIDTH - 1:0]spi_chip_sel_i,
+	output [SPI_CS_WIDTH - 1:0]spi_chip_sel_o,
+	output [SPI_CS_WIDTH - 1:0]spi_chip_sel_t,
+
+	//debug ports
+	//output [31:0]dbg_out,
+
+	//interrupt
+	output spi_interrupt_out
+	
+);
+/*
+ila_0 dbg_mod(
+	.clk(axi_clk),
+	.probe0(dbg_out),
+	.probe1(spi_bit_stream_ptr),
+	.probe2(spi_tx_byte_src),
+	.probe3(reg_waddr),
+	.probe4(wact)
+);
+*/
+//debug assign
+(* keep = "true" *) wire [31:0]dbg_out;
+(* keep = "true" *) reg [31:0]dbg_reg;
+assign dbg_out = {reg_waddr		,reg_raddr		,reg_rd};
+always @(posedge axi_clk ) begin
+	dbg_reg <= dbg_out;
+end
+integer i;
+
+parameter integer REG_DATA_WIDTH = 16;
+
+parameter integer TX_FIFO_ADDR = 4;
+parameter integer RX_FIFO_ADDR = 4;
+parameter integer SPI_CS_W1C_ADDR = 8;
+parameter integer SPI_CHIP_SEL_ADDR = 12;
+parameter integer SPI_CS_W1S_ADDR = 16;
+parameter integer SPI_CTL_ADDR = 20;
+parameter integer SPI_CLK_SPCL_ADDR = 24;
+parameter integer OP_STATUS_ADDR = 28;
+parameter integer SPI_BURST_CNT_ADDR = 0;
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8===================                                             ==================D
+*8=================          SPI TRANSMIT & TRIGGER CONTROL         ================D
+*8===================                                             ==================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+//start writing when host write to reg 0;
+wire spi_op_busy;
+reg [2:0]spi_op_busy_p;//0 is source_mm 1 is source_strm 2 is follow
+wire spi_op_busy_p_src;
+assign spi_op_busy_p_src = mm_s_sel? spi_op_busy_p[1] : spi_op_busy_p[0];
+assign spi_op_busy = ^{spi_op_busy_p[2],spi_op_busy_p_src};
+assign axi_ready = ~spi_op_busy_gate_mm_f;
+assign axis_ready = ~spi_op_busy_gate_s_f;
+
+
+reg [7:0]spi_tx_byte_mm;
+//mm write trigger
+always @(posedge axi_clk or negedge rst_n) begin
+	if(~rst_n) begin
+		spi_op_busy_p[0] <= 1'h0;
+		spi_tx_byte_mm <= 8'h0;
+	end else if(wact && reg_waddr == TX_FIFO_ADDR && !spi_op_busy) begin
+		spi_op_busy_p[0] <= ~spi_op_busy_p[0];
+		spi_tx_byte_mm <= reg_wr[7:0];
+	end else if(wact && reg_waddr == SPI_CTL_ADDR) begin
+		//prevent unwanted transfer trigger during source change.
+		spi_op_busy_p[0] <= spi_op_busy_p[2];
+		spi_tx_byte_mm <= spi_tx_byte_mm;
+	end else begin
+		spi_op_busy_p[0] <= spi_op_busy_p[0];
+		spi_tx_byte_mm <= spi_tx_byte_mm;
+	end
+end
+
+
+//strm write trigger
+reg [31:0]spi_tx_byte_s_w;
+wire axis_wr;
+assign axis_wr = axis_ready & axis_valid;
+
+always @(posedge axis_clk or negedge rst_n) begin
+	if(~rst_n) begin
+		spi_op_busy_p[1] <= 1'h0;
+		spi_tx_byte_s_w <= 8'h0;
+	end else if((spi_burst_read | axis_wr) && !spi_op_busy) begin
+		spi_op_busy_p[1] <= ~spi_op_busy_p[1];
+		spi_tx_byte_s_w <= spi_burst_read? 32'h53525150 : axis_data;
+	end else if(wact && reg_waddr == SPI_CTL_ADDR) begin
+		//prevent unwanted transfer trigger during source change.
+		spi_op_busy_p[1] <= spi_op_busy_p[2];
+		spi_tx_byte_s_w <= spi_tx_byte_s_w;
+	end else begin
+		spi_op_busy_p[1] <= spi_op_busy_p[1];
+		spi_tx_byte_s_w <= spi_tx_byte_s_w;
+	end
+end
+
+
+wire spi_transfer_complete;
+reg [4:0]spi_bit_stream_ptr;
+wire [1:0]spi_byte_order_ptr;
+assign spi_byte_order_ptr = spi_bit_stream_ptr[4:3];
+assign spi_transfer_complete = &{spi_bit_stream_ptr[4] | ~mm_s_sel,spi_bit_stream_ptr[3] | ~mm_s_sel,spi_bit_stream_ptr[2:0]};
+
+always @(negedge spi_clk_o or negedge rst_n) begin
+	if(~rst_n) begin
+		spi_bit_stream_ptr <= 5'h0;
+	end else if(spi_op_busy) begin
+		spi_bit_stream_ptr <= (spi_bit_stream_ptr + 3'h1) & {{2{mm_s_sel}},3'b111};
+	end else begin
+		spi_bit_stream_ptr <= spi_bit_stream_ptr;
+	end
+end
+
+always @(negedge spi_clk_o or negedge rst_n) begin
+	if(~rst_n) begin
+		spi_op_busy_p[2] <= 1'h0;
+	end else if(spi_transfer_complete) begin
+		spi_op_busy_p[2] <= spi_op_busy_p_src;
+	end else begin
+		spi_op_busy_p[2] <= spi_op_busy_p[2];
+	end
+end
+
+wire [7:0]spi_tx_byte_s;
+assign spi_tx_byte_s =	(spi_byte_order_ptr == 2'h0)? spi_tx_byte_s_w[7:0] :
+						(spi_byte_order_ptr == 2'h1)? spi_tx_byte_s_w[15:8] :
+						(spi_byte_order_ptr == 2'h2)? spi_tx_byte_s_w[23:16] :spi_tx_byte_s_w[31:24];
+
+//data_src_select
+wire [7:0]spi_tx_byte_src;
+assign spi_tx_byte_src = mm_s_sel? spi_tx_byte_s : spi_tx_byte_mm;
+
+//mosi generate by muxing from tx_byte reg.
+	assign spi_mosi_o = (spi_bit_stream_ptr[2:0] == 3'h0)? spi_tx_byte_src[7] :
+						(spi_bit_stream_ptr[2:0] == 3'h1)? spi_tx_byte_src[6] :
+						(spi_bit_stream_ptr[2:0] == 3'h2)? spi_tx_byte_src[5] :
+						(spi_bit_stream_ptr[2:0] == 3'h3)? spi_tx_byte_src[4] :
+						(spi_bit_stream_ptr[2:0] == 3'h4)? spi_tx_byte_src[3] :
+						(spi_bit_stream_ptr[2:0] == 3'h5)? spi_tx_byte_src[2] :
+						(spi_bit_stream_ptr[2:0] == 3'h6)? spi_tx_byte_src[1] :spi_tx_byte_src[0];
+
+	
+
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8===================                                             ==================D
+*8=================              SPI CHIP SELECT BLOCK              ================D
+*8===================                                             ==================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+
+	reg [15:0]chip_sel_r;
+	//user write control_b into reg
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			chip_sel_r <= 16'hFFFF;
+		end else if(wact && reg_waddr == SPI_CHIP_SEL_ADDR)begin
+			chip_sel_r <= reg_wr;
+		end else if(wact && reg_waddr == SPI_CS_W1C_ADDR)begin
+			chip_sel_r <= chip_sel_r & ~reg_wr;
+		end else if(wact && reg_waddr == SPI_CS_W1S_ADDR)begin
+			chip_sel_r <= chip_sel_r | reg_wr;
+		end else begin
+			chip_sel_r <= chip_sel_r;
+		end
+		
+	end
+	assign spi_chip_sel_o = chip_sel_r[SPI_CS_WIDTH-1:0];
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8===================                                             ==================D
+*8=================              SPI CLOCK GENERATION               ================D
+*8===================                                             ==================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+	reg [15:0]spi_clk_pscl;
+	reg [3:0]spi_clk_pscl_sel;
+	wire spi_clk_gen;
+	
+	
+	//user write control_b into reg
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_clk_pscl_sel <= 1;
+		end else if(wact && reg_waddr == SPI_CLK_SPCL_ADDR)begin
+			spi_clk_pscl_sel <= reg_wr[3:0];
+		end else begin
+			spi_clk_pscl_sel <= spi_clk_pscl_sel;
+		end
+		
+	end
+
+
+	assign spi_clk_gen =(spi_clk_pscl_sel == 4'h0)? axi_clk :
+						(spi_clk_pscl_sel == 4'h1)? spi_clk_pscl[0] :
+						(spi_clk_pscl_sel == 4'h2)? spi_clk_pscl[1] :
+						(spi_clk_pscl_sel == 4'h3)? spi_clk_pscl[2] :
+						(spi_clk_pscl_sel == 4'h4)? spi_clk_pscl[3] :
+						(spi_clk_pscl_sel == 4'h5)? spi_clk_pscl[4] :
+						(spi_clk_pscl_sel == 4'h6)? spi_clk_pscl[5] :
+						(spi_clk_pscl_sel == 4'h7)? spi_clk_pscl[6] :
+						(spi_clk_pscl_sel == 4'h8)? spi_clk_pscl[7] :
+						(spi_clk_pscl_sel == 4'h9)? spi_clk_pscl[8] :
+						(spi_clk_pscl_sel == 4'hA)? spi_clk_pscl[9] :
+						(spi_clk_pscl_sel == 4'hB)? spi_clk_pscl[10] :
+						(spi_clk_pscl_sel == 4'hC)? spi_clk_pscl[11] :
+						(spi_clk_pscl_sel == 4'hD)? spi_clk_pscl[12] :
+						(spi_clk_pscl_sel == 4'hE)? spi_clk_pscl[13] :
+						(spi_clk_pscl_sel == 4'hF)? spi_clk_pscl[14] : spi_clk_pscl[15];
+
+
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_clk_pscl <= 16'b0;
+		end else begin
+			spi_clk_pscl <= spi_clk_pscl + 1;
+		end
+		
+	end
+
+	reg spi_op_busy_gate_mm_f;
+	always @(negedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_op_busy_gate_mm_f <= 1'b0;
+		end else begin
+			spi_op_busy_gate_mm_f <= spi_op_busy;
+		end
+	end
+	
+	reg spi_op_busy_gate;
+	always @(negedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_op_busy_gate <= 1'b0;
+		end else if(~spi_clk_gen) begin
+			spi_op_busy_gate <= spi_op_busy;
+		end else begin
+			spi_op_busy_gate <= spi_op_busy_gate;
+		end
+	end
+	
+	reg spi_op_busy_gate_s_f;
+	always @(negedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_op_busy_gate_s_f <= 1'b0;
+		end else begin
+			spi_op_busy_gate_s_f <= spi_op_busy;
+		end
+	end
+	
+	//external spi_clk_o gating
+	assign spi_clk_o = spi_op_busy_gate & spi_clk_gen;
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8===================                                             ==================D
+*8=================     MISO SECTION    HANDLE INPUT BIT STREAM     ================D
+*8===================                                             ==================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+	//spi_miso bit stream shift in block
+	reg [31:0]spi_rx_shift;
+	always @(posedge spi_clk_o or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_rx_shift <= 0;
+		end else begin
+			spi_rx_shift <= {spi_rx_shift[30:0],spi_miso_i};
+		end
+		
+	end
+
+
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8======================                                       =====================D
+*8====================              SPI IP CONTROL               ===================D
+*8======================                                       =====================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+reg [15:0]spi_ctl_reg;//
+
+//[15]:		spi data source: 0:data from mm; 1:data from stream
+//[14:0]:	reserved
+
+
+	//user write control_b into reg
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_ctl_reg <= 0;
+		end else if(wact && reg_waddr == SPI_CTL_ADDR && ~spi_op_busy)begin
+			spi_ctl_reg <= reg_wr;
+		end else begin
+			spi_ctl_reg <= spi_ctl_reg;
+		end
+		
+	end
+
+wire mm_s_sel;
+assign mm_s_sel = spi_ctl_reg[15];
+wire cs_output_en;
+assign cs_output_en = spi_ctl_reg[0];
+wire clk_mosi_forced_en;
+assign clk_mosi_forced_en = spi_ctl_reg[1];
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8======================                                       =====================D
+*8====================       AXIS READ STREAM OUTPUT DRIVE       ===================D
+*8======================                                       =====================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+	assign axis_rdata = {spi_rx_shift[7:0],spi_rx_shift[15:8],spi_rx_shift[23:16],spi_rx_shift[31:24]};
+	//spi burst read state machine
+	reg axis_rvalid_r;
+	reg [3:0]axis_rvalid_stat;
+	localparam AXIS_STATE_SPI_IDLE = 0;
+	localparam AXIS_STATE_SPI_READ = 1;
+	localparam AXIS_STATE_SPI_DONE = 2;
+	reg [15:0]axis_r_byte_cnt;
+	wire spi_burst_read;
+	reg spi_burst_read_r;
+	reg axis_rlast_r;
+	assign spi_burst_read = spi_burst_read_r & axis_rready;
+	assign axis_rvalid = axis_rvalid_r;
+	assign axis_rlast = axis_rlast_r;
+
+
+
+	always @(posedge axi_clk or negedge rst_n ) begin
+		if(~rst_n)begin
+			axis_r_byte_cnt <= 16'h0;
+		end else if(wact && reg_waddr == SPI_BURST_CNT_ADDR && !spi_op_busy) begin
+			if(mm_s_sel)axis_r_byte_cnt <= reg_wr;
+			else axis_r_byte_cnt <= 16'h0;
+		end else if(spi_burst_read && ~spi_op_busy_gate_s_f) begin
+			axis_r_byte_cnt <= axis_r_byte_cnt - 16'h1;
+		end else begin
+			axis_r_byte_cnt <= axis_r_byte_cnt;
+		end
+	end
+
+
+	always @(negedge axi_clk or negedge rst_n ) begin
+		if(~rst_n)begin
+			axis_rvalid_stat <= AXIS_STATE_SPI_IDLE;
+			spi_burst_read_r <= 1'b0;
+			axis_rvalid_r <= 1'b0;
+			axis_rlast_r <= 1'b0;
+		end else begin
+			//axis_rvalid_r <= {axis_rvalid_r[0],&spi_bit_stream_ptr};
+			case (axis_rvalid_stat)
+				AXIS_STATE_SPI_IDLE : begin
+					//go to read if axis_r_byte_cnt is not 0
+					if(|axis_r_byte_cnt) begin
+						axis_rvalid_stat <= AXIS_STATE_SPI_READ;
+						spi_burst_read_r <= 1'b1;
+						axis_rvalid_r <= 1'b0;
+						axis_rlast_r <= 1'b0;
+
+					end else begin
+						axis_rvalid_stat <= axis_rvalid_stat;
+						spi_burst_read_r <= spi_burst_read_r;
+						axis_rvalid_r <= axis_rvalid_r;
+						axis_rlast_r <= 1'b0;
+					end
+				end
+				AXIS_STATE_SPI_READ : begin
+					//go to spi done if &spi_bit_stream_ptr and spi_clk
+					if(&spi_bit_stream_ptr & spi_clk_o) begin
+						axis_rvalid_stat <= AXIS_STATE_SPI_DONE;
+						spi_burst_read_r <= 1'b0;
+						axis_rvalid_r <= 1'b1;
+						axis_rlast_r <= ~|axis_r_byte_cnt;
+
+					end else begin
+						axis_rvalid_stat <= axis_rvalid_stat;
+						spi_burst_read_r <= spi_burst_read_r;
+						axis_rvalid_r <= axis_rvalid_r;
+						axis_rlast_r <= 1'b0;
+					end
+				end
+				AXIS_STATE_SPI_DONE : begin
+					//go to spi idle if axis_r_byte_cnt is 0 and axis_rvalid and axis_rready
+					if(axis_rvalid & axis_rready) begin
+						axis_rvalid_stat <= |axis_r_byte_cnt ? AXIS_STATE_SPI_READ : AXIS_STATE_SPI_IDLE;
+						spi_burst_read_r <= |axis_r_byte_cnt;
+						axis_rvalid_r <= 1'b0;
+						axis_rlast_r <= 1'b0;
+
+					end else begin
+						axis_rvalid_stat <= axis_rvalid_stat;
+						spi_burst_read_r <= spi_burst_read_r;
+						axis_rvalid_r <= axis_rvalid_r;
+						axis_rlast_r <= ~|axis_r_byte_cnt;
+					end 
+				end
+				default: begin
+					axis_rvalid_stat <= AXIS_STATE_SPI_IDLE;
+					spi_burst_read_r <= 1'b0;
+					axis_rvalid_r <= 1'b0;
+					axis_rlast_r <= 1'b0;
+				end
+			endcase
+		end
+	end
+
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8======================                                       =====================D
+*8====================    PROPER TRI STATE EXTRA PORT ASSIGN     ===================D
+*8======================                                       =====================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+assign spi_clk_t = ~spi_op_busy & ~clk_mosi_forced_en;//enable output when module is busy
+assign spi_mosi_t = ~spi_op_busy & ~clk_mosi_forced_en;//enable output when module is busy
+assign spi_miso_t = 1'b1;//why? it is always input
+assign spi_miso_o = 1'b1;//always input
+assign spi_chip_sel_t = ~{SPI_CS_WIDTH{cs_output_en}};//reset as input
+
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8======================                                       =====================D
+*8====================    TO SYSTEM MM INTERFACE OUTPUT DRIVE    ===================D
+*8======================                                       =====================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+assign reg_rd = ( reg_raddr == TX_FIFO_ADDR) ? {8'h00,spi_rx_shift[7:0]} : 	//read current transmitting byte *mosi_fifo_pop_ptr
+				( reg_raddr == SPI_CHIP_SEL_ADDR) ? {chip_sel_r} :		//read chip sel reg
+				( reg_raddr == OP_STATUS_ADDR) ? {14'h000,spi_op_busy,1'b0} :	//read status reg
+				( reg_raddr == SPI_CLK_SPCL_ADDR) ? {12'h000,spi_clk_pscl_sel}: //read clk prescaler select
+				( reg_raddr == SPI_CTL_ADDR) ? {12'h000,spi_ctl_reg}: //read spi control reg
+				8'h55;
+
+
+
+endmodule

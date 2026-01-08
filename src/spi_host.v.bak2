@@ -1,0 +1,976 @@
+//Host write and read simultaniously. remember to pop off extra bytes from the commands before reading.
+//Each mosi write will cause a byte from miso be pushed into miso fifo regardless of it's usefullness.
+
+//The circular buffer used for fifos WILL NOT STOP OVER FLOWS. Check each fifo's availability before writing data larger then it's capacity.
+
+//Physical writes will initiate as long as there is data in MOSI fifo
+
+//SPI clock is only enabled during tranfers.
+
+// MM interface:
+// <reg>:	W/R	name			description
+
+// reg0:	XX	reserved
+// reg1:	WR	mosi_miso_fifo	write to push LSB to spi MOSI queue read to pop one byte off MISO queue
+// reg2:	XX	reserved
+// reg3:	RW	chip_sel_reg	write to enable chip select. the bits that are 1s are selected 		
+
+//control status
+// reg4:	RO	host_status		display host status bit map: {above reserved,	read_buffer_full,	read_available,	write_buffer_full,	write_in_progress}
+// reg5:	RW	host_ctrl_a		control the host's behavior, the other configs will load on writing to this reg: {reserved,	cpha,	cpol}
+// reg6:	RW	host_ctrl_b		control the host's clock pre_scaler: {reserved,	pre_scaler[3:0]}
+// reg7:	RW	host_ctrl_c		control the host's clock divider: {divider[15:0]}	
+
+//fifo_size			64	in 2's power increment, please
+//fifo_size_bits	6	depends on fifo_size as (log(fifo_size)/log(2) + 1)
+
+module spi_host (
+	//spi interface
+	output wire spi_clk,
+	output wire spi_mosi,
+	input wire spi_miso,
+	output wire spi_clk_gen_out,
+
+	//control_status interface
+	input axi_clk,
+	input rst_n,
+	input wact,
+	input ract,
+	input [7:0]reg_waddr,
+	input [7:0]reg_raddr,
+	output [REG_DATA_WIDTH - 1:0]reg_rd,
+	input [REG_DATA_WIDTH - 1:0]reg_wr,
+
+	//chip sel
+	output [15:0]spi_chip_sel,
+
+	//debug ports
+	output [31:0]dbg_out,
+
+	//interrupt
+	output spi_interrupt_out
+	
+);
+
+//debug assign
+assign dbg_out = {4'h0,spi_clk_pscl_sel		,reg_waddr		,reg_raddr		,1'b0,mosi_fifo_psh_ptr};
+integer i;
+
+parameter integer REG_DATA_WIDTH = 16;
+parameter integer TX_FIFO_ADDR = 1;
+parameter integer RX_FIFO_ADDR = 1;
+parameter integer SPI_CHIP_SEL_ADDR = 3;
+parameter integer OP_STATUS_ADDR = 4;
+parameter integer SPI_CLK_SPCL_ADDR = 6;
+
+	//MOSI fifo counter
+	reg [6:0]mosi_fifo_psh_ptr;
+	reg [6:0]mosi_fifo_pop_ptr;
+	
+	wire [6:0]mosi_fifo_psh_ptr_nxt;
+	//reg [6:0]mosi_fifo_psh_ptr_nxt_sync;// make sure the transmiting 
+	assign mosi_fifo_psh_ptr_nxt = (&{mosi_fifo_psh_ptr[6],~mosi_fifo_psh_ptr[6 - 1:0]})? 0 : mosi_fifo_psh_ptr + 1;
+
+	wire [6:0]mosi_fifo_pop_ptr_nxt;
+	assign mosi_fifo_pop_ptr_nxt = (&{mosi_fifo_pop_ptr[6],~mosi_fifo_pop_ptr[6 - 1:0]})? 0 : mosi_fifo_pop_ptr + 1;
+
+	wire mosi_empty;
+	assign mosi_empty = ~|(mosi_fifo_psh_ptr ^ mosi_fifo_pop_ptr);
+	wire mosi_full;
+	assign mosi_full = ~|(mosi_fifo_psh_ptr_nxt ^ mosi_fifo_pop_ptr);
+
+	//user push byte into mosi fifo
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			mosi_fifo_psh_ptr <= 0;
+		end else if(wact && reg_waddr == TX_FIFO_ADDR && ~mosi_full)begin
+			mosi_fifo_psh_ptr <= mosi_fifo_psh_ptr_nxt;
+		end else begin
+			mosi_fifo_psh_ptr <= mosi_fifo_psh_ptr;
+		end
+		
+	end
+
+	//host pop byte counter
+
+	always @(negedge spi_load_next_byte or negedge rst_n) begin
+		if(~rst_n)begin
+			mosi_fifo_pop_ptr <= 0;
+		end else if(~mosi_empty)begin
+			mosi_fifo_pop_ptr <= mosi_fifo_pop_ptr_nxt;
+		end else begin
+			mosi_fifo_pop_ptr <= mosi_fifo_pop_ptr;
+		end
+		
+	end
+
+	//mosi fifo block
+	reg [7:0]mosi_fifo_0;
+	reg [7:0]mosi_fifo_1;
+	reg [7:0]mosi_fifo_2;
+	reg [7:0]mosi_fifo_3;
+	reg [7:0]mosi_fifo_4;
+	reg [7:0]mosi_fifo_5;
+	reg [7:0]mosi_fifo_6;
+	reg [7:0]mosi_fifo_7;
+	reg [7:0]mosi_fifo_8;
+	reg [7:0]mosi_fifo_9;
+	reg [7:0]mosi_fifo_10;
+	reg [7:0]mosi_fifo_11;
+	reg [7:0]mosi_fifo_12;
+	reg [7:0]mosi_fifo_13;
+	reg [7:0]mosi_fifo_14;
+	reg [7:0]mosi_fifo_15;
+	reg [7:0]mosi_fifo_16;
+	reg [7:0]mosi_fifo_17;
+	reg [7:0]mosi_fifo_18;
+	reg [7:0]mosi_fifo_19;
+	reg [7:0]mosi_fifo_20;
+	reg [7:0]mosi_fifo_21;
+	reg [7:0]mosi_fifo_22;
+	reg [7:0]mosi_fifo_23;
+	reg [7:0]mosi_fifo_24;
+	reg [7:0]mosi_fifo_25;
+	reg [7:0]mosi_fifo_26;
+	reg [7:0]mosi_fifo_27;
+	reg [7:0]mosi_fifo_28;
+	reg [7:0]mosi_fifo_29;
+	reg [7:0]mosi_fifo_30;
+	reg [7:0]mosi_fifo_31;
+	reg [7:0]mosi_fifo_32;
+	reg [7:0]mosi_fifo_33;
+	reg [7:0]mosi_fifo_34;
+	reg [7:0]mosi_fifo_35;
+	reg [7:0]mosi_fifo_36;
+	reg [7:0]mosi_fifo_37;
+	reg [7:0]mosi_fifo_38;
+	reg [7:0]mosi_fifo_39;
+	reg [7:0]mosi_fifo_40;
+	reg [7:0]mosi_fifo_41;
+	reg [7:0]mosi_fifo_42;
+	reg [7:0]mosi_fifo_43;
+	reg [7:0]mosi_fifo_44;
+	reg [7:0]mosi_fifo_45;
+	reg [7:0]mosi_fifo_46;
+	reg [7:0]mosi_fifo_47;
+	reg [7:0]mosi_fifo_48;
+	reg [7:0]mosi_fifo_49;
+	reg [7:0]mosi_fifo_50;
+	reg [7:0]mosi_fifo_51;
+	reg [7:0]mosi_fifo_52;
+	reg [7:0]mosi_fifo_53;
+	reg [7:0]mosi_fifo_54;
+	reg [7:0]mosi_fifo_55;
+	reg [7:0]mosi_fifo_56;
+	reg [7:0]mosi_fifo_57;
+	reg [7:0]mosi_fifo_58;
+	reg [7:0]mosi_fifo_59;
+	reg [7:0]mosi_fifo_60;
+	reg [7:0]mosi_fifo_61;
+	reg [7:0]mosi_fifo_62;
+	reg [7:0]mosi_fifo_63;
+	reg [7:0]mosi_fifo_64;
+
+	wire write_mosi_fifo;
+	always @ (posedge axi_clk or negedge rst_n) begin
+		if(~rst_n) begin
+			mosi_fifo_0 <= 8'h0;
+			mosi_fifo_1 <= 8'h0;
+			mosi_fifo_2 <= 8'h0;
+			mosi_fifo_3 <= 8'h0;
+			mosi_fifo_4 <= 8'h0;
+			mosi_fifo_5 <= 8'h0;
+			mosi_fifo_6 <= 8'h0;
+			mosi_fifo_7 <= 8'h0;
+			mosi_fifo_8 <= 8'h0;
+			mosi_fifo_9 <= 8'h0;
+			mosi_fifo_10 <= 8'h0;
+			mosi_fifo_11 <= 8'h0;
+			mosi_fifo_12 <= 8'h0;
+			mosi_fifo_13 <= 8'h0;
+			mosi_fifo_14 <= 8'h0;
+			mosi_fifo_15 <= 8'h0;
+			mosi_fifo_16 <= 8'h0;
+			mosi_fifo_17 <= 8'h0;
+			mosi_fifo_18 <= 8'h0;
+			mosi_fifo_19 <= 8'h0;
+			mosi_fifo_20 <= 8'h0;
+			mosi_fifo_21 <= 8'h0;
+			mosi_fifo_22 <= 8'h0;
+			mosi_fifo_23 <= 8'h0;
+			mosi_fifo_24 <= 8'h0;
+			mosi_fifo_25 <= 8'h0;
+			mosi_fifo_26 <= 8'h0;
+			mosi_fifo_27 <= 8'h0;
+			mosi_fifo_28 <= 8'h0;
+			mosi_fifo_29 <= 8'h0;
+			mosi_fifo_30 <= 8'h0;
+			mosi_fifo_31 <= 8'h0;
+			mosi_fifo_32 <= 8'h0;
+			mosi_fifo_33 <= 8'h0;
+			mosi_fifo_34 <= 8'h0;
+			mosi_fifo_35 <= 8'h0;
+			mosi_fifo_36 <= 8'h0;
+			mosi_fifo_37 <= 8'h0;
+			mosi_fifo_38 <= 8'h0;
+			mosi_fifo_39 <= 8'h0;
+			mosi_fifo_40 <= 8'h0;
+			mosi_fifo_41 <= 8'h0;
+			mosi_fifo_42 <= 8'h0;
+			mosi_fifo_43 <= 8'h0;
+			mosi_fifo_44 <= 8'h0;
+			mosi_fifo_45 <= 8'h0;
+			mosi_fifo_46 <= 8'h0;
+			mosi_fifo_47 <= 8'h0;
+			mosi_fifo_48 <= 8'h0;
+			mosi_fifo_49 <= 8'h0;
+			mosi_fifo_50 <= 8'h0;
+			mosi_fifo_51 <= 8'h0;
+			mosi_fifo_52 <= 8'h0;
+			mosi_fifo_53 <= 8'h0;
+			mosi_fifo_54 <= 8'h0;
+			mosi_fifo_55 <= 8'h0;
+			mosi_fifo_56 <= 8'h0;
+			mosi_fifo_57 <= 8'h0;
+			mosi_fifo_58 <= 8'h0;
+			mosi_fifo_59 <= 8'h0;
+			mosi_fifo_60 <= 8'h0;
+			mosi_fifo_61 <= 8'h0;
+			mosi_fifo_62 <= 8'h0;
+			mosi_fifo_63 <= 8'h0;
+		end else if(wact && reg_waddr == TX_FIFO_ADDR && ~mosi_full) begin
+			mosi_fifo_0 <= (mosi_fifo_psh_ptr == 7'd0) ? reg_wr[7:0] : mosi_fifo_0 ;
+			mosi_fifo_1 <= (mosi_fifo_psh_ptr == 7'd1) ? reg_wr[7:0] : mosi_fifo_1 ;
+			mosi_fifo_2 <= (mosi_fifo_psh_ptr == 7'd2) ? reg_wr[7:0] : mosi_fifo_2 ;
+			mosi_fifo_3 <= (mosi_fifo_psh_ptr == 7'd3) ? reg_wr[7:0] : mosi_fifo_3 ;
+			mosi_fifo_4 <= (mosi_fifo_psh_ptr == 7'd4) ? reg_wr[7:0] : mosi_fifo_4 ;
+			mosi_fifo_5 <= (mosi_fifo_psh_ptr == 7'd5) ? reg_wr[7:0] : mosi_fifo_5 ;
+			mosi_fifo_6 <= (mosi_fifo_psh_ptr == 7'd6) ? reg_wr[7:0] : mosi_fifo_6 ;
+			mosi_fifo_7 <= (mosi_fifo_psh_ptr == 7'd7) ? reg_wr[7:0] : mosi_fifo_7 ;
+			mosi_fifo_8 <= (mosi_fifo_psh_ptr == 7'd8) ? reg_wr[7:0] : mosi_fifo_8 ;
+			mosi_fifo_9 <= (mosi_fifo_psh_ptr == 7'd9) ? reg_wr[7:0] : mosi_fifo_9 ;
+			mosi_fifo_10 <= (mosi_fifo_psh_ptr == 7'd10) ? reg_wr[7:0] : mosi_fifo_10 ;
+			mosi_fifo_11 <= (mosi_fifo_psh_ptr == 7'd11) ? reg_wr[7:0] : mosi_fifo_11 ;
+			mosi_fifo_12 <= (mosi_fifo_psh_ptr == 7'd12) ? reg_wr[7:0] : mosi_fifo_12 ;
+			mosi_fifo_13 <= (mosi_fifo_psh_ptr == 7'd13) ? reg_wr[7:0] : mosi_fifo_13 ;
+			mosi_fifo_14 <= (mosi_fifo_psh_ptr == 7'd14) ? reg_wr[7:0] : mosi_fifo_14 ;
+			mosi_fifo_15 <= (mosi_fifo_psh_ptr == 7'd15) ? reg_wr[7:0] : mosi_fifo_15 ;
+			mosi_fifo_16 <= (mosi_fifo_psh_ptr == 7'd16) ? reg_wr[7:0] : mosi_fifo_16 ;
+			mosi_fifo_17 <= (mosi_fifo_psh_ptr == 7'd17) ? reg_wr[7:0] : mosi_fifo_17 ;
+			mosi_fifo_18 <= (mosi_fifo_psh_ptr == 7'd18) ? reg_wr[7:0] : mosi_fifo_18 ;
+			mosi_fifo_19 <= (mosi_fifo_psh_ptr == 7'd19) ? reg_wr[7:0] : mosi_fifo_19 ;
+			mosi_fifo_20 <= (mosi_fifo_psh_ptr == 7'd20) ? reg_wr[7:0] : mosi_fifo_20 ;
+			mosi_fifo_21 <= (mosi_fifo_psh_ptr == 7'd21) ? reg_wr[7:0] : mosi_fifo_21 ;
+			mosi_fifo_22 <= (mosi_fifo_psh_ptr == 7'd22) ? reg_wr[7:0] : mosi_fifo_22 ;
+			mosi_fifo_23 <= (mosi_fifo_psh_ptr == 7'd23) ? reg_wr[7:0] : mosi_fifo_23 ;
+			mosi_fifo_24 <= (mosi_fifo_psh_ptr == 7'd24) ? reg_wr[7:0] : mosi_fifo_24 ;
+			mosi_fifo_25 <= (mosi_fifo_psh_ptr == 7'd25) ? reg_wr[7:0] : mosi_fifo_25 ;
+			mosi_fifo_26 <= (mosi_fifo_psh_ptr == 7'd26) ? reg_wr[7:0] : mosi_fifo_26 ;
+			mosi_fifo_27 <= (mosi_fifo_psh_ptr == 7'd27) ? reg_wr[7:0] : mosi_fifo_27 ;
+			mosi_fifo_28 <= (mosi_fifo_psh_ptr == 7'd28) ? reg_wr[7:0] : mosi_fifo_28 ;
+			mosi_fifo_29 <= (mosi_fifo_psh_ptr == 7'd29) ? reg_wr[7:0] : mosi_fifo_29 ;
+			mosi_fifo_30 <= (mosi_fifo_psh_ptr == 7'd30) ? reg_wr[7:0] : mosi_fifo_30 ;
+			mosi_fifo_31 <= (mosi_fifo_psh_ptr == 7'd31) ? reg_wr[7:0] : mosi_fifo_31 ;
+			mosi_fifo_32 <= (mosi_fifo_psh_ptr == 7'd32) ? reg_wr[7:0] : mosi_fifo_32 ;
+			mosi_fifo_33 <= (mosi_fifo_psh_ptr == 7'd33) ? reg_wr[7:0] : mosi_fifo_33 ;
+			mosi_fifo_34 <= (mosi_fifo_psh_ptr == 7'd34) ? reg_wr[7:0] : mosi_fifo_34 ;
+			mosi_fifo_35 <= (mosi_fifo_psh_ptr == 7'd35) ? reg_wr[7:0] : mosi_fifo_35 ;
+			mosi_fifo_36 <= (mosi_fifo_psh_ptr == 7'd36) ? reg_wr[7:0] : mosi_fifo_36 ;
+			mosi_fifo_37 <= (mosi_fifo_psh_ptr == 7'd37) ? reg_wr[7:0] : mosi_fifo_37 ;
+			mosi_fifo_38 <= (mosi_fifo_psh_ptr == 7'd38) ? reg_wr[7:0] : mosi_fifo_38 ;
+			mosi_fifo_39 <= (mosi_fifo_psh_ptr == 7'd39) ? reg_wr[7:0] : mosi_fifo_39 ;
+			mosi_fifo_40 <= (mosi_fifo_psh_ptr == 7'd40) ? reg_wr[7:0] : mosi_fifo_40 ;
+			mosi_fifo_41 <= (mosi_fifo_psh_ptr == 7'd41) ? reg_wr[7:0] : mosi_fifo_41 ;
+			mosi_fifo_42 <= (mosi_fifo_psh_ptr == 7'd42) ? reg_wr[7:0] : mosi_fifo_42 ;
+			mosi_fifo_43 <= (mosi_fifo_psh_ptr == 7'd43) ? reg_wr[7:0] : mosi_fifo_43 ;
+			mosi_fifo_44 <= (mosi_fifo_psh_ptr == 7'd44) ? reg_wr[7:0] : mosi_fifo_44 ;
+			mosi_fifo_45 <= (mosi_fifo_psh_ptr == 7'd45) ? reg_wr[7:0] : mosi_fifo_45 ;
+			mosi_fifo_46 <= (mosi_fifo_psh_ptr == 7'd46) ? reg_wr[7:0] : mosi_fifo_46 ;
+			mosi_fifo_47 <= (mosi_fifo_psh_ptr == 7'd47) ? reg_wr[7:0] : mosi_fifo_47 ;
+			mosi_fifo_48 <= (mosi_fifo_psh_ptr == 7'd48) ? reg_wr[7:0] : mosi_fifo_48 ;
+			mosi_fifo_49 <= (mosi_fifo_psh_ptr == 7'd49) ? reg_wr[7:0] : mosi_fifo_49 ;
+			mosi_fifo_50 <= (mosi_fifo_psh_ptr == 7'd50) ? reg_wr[7:0] : mosi_fifo_50 ;
+			mosi_fifo_51 <= (mosi_fifo_psh_ptr == 7'd51) ? reg_wr[7:0] : mosi_fifo_51 ;
+			mosi_fifo_52 <= (mosi_fifo_psh_ptr == 7'd52) ? reg_wr[7:0] : mosi_fifo_52 ;
+			mosi_fifo_53 <= (mosi_fifo_psh_ptr == 7'd53) ? reg_wr[7:0] : mosi_fifo_53 ;
+			mosi_fifo_54 <= (mosi_fifo_psh_ptr == 7'd54) ? reg_wr[7:0] : mosi_fifo_54 ;
+			mosi_fifo_55 <= (mosi_fifo_psh_ptr == 7'd55) ? reg_wr[7:0] : mosi_fifo_55 ;
+			mosi_fifo_56 <= (mosi_fifo_psh_ptr == 7'd56) ? reg_wr[7:0] : mosi_fifo_56 ;
+			mosi_fifo_57 <= (mosi_fifo_psh_ptr == 7'd57) ? reg_wr[7:0] : mosi_fifo_57 ;
+			mosi_fifo_58 <= (mosi_fifo_psh_ptr == 7'd58) ? reg_wr[7:0] : mosi_fifo_58 ;
+			mosi_fifo_59 <= (mosi_fifo_psh_ptr == 7'd59) ? reg_wr[7:0] : mosi_fifo_59 ;
+			mosi_fifo_60 <= (mosi_fifo_psh_ptr == 7'd60) ? reg_wr[7:0] : mosi_fifo_60 ;
+			mosi_fifo_61 <= (mosi_fifo_psh_ptr == 7'd61) ? reg_wr[7:0] : mosi_fifo_61 ;
+			mosi_fifo_62 <= (mosi_fifo_psh_ptr == 7'd62) ? reg_wr[7:0] : mosi_fifo_62 ;
+			mosi_fifo_63 <= (mosi_fifo_psh_ptr == 7'd63) ? reg_wr[7:0] : mosi_fifo_63 ;
+		end else begin
+			mosi_fifo_0 <= mosi_fifo_0 ;
+			mosi_fifo_1 <= mosi_fifo_1 ;
+			mosi_fifo_2 <= mosi_fifo_2 ;
+			mosi_fifo_3 <= mosi_fifo_3 ;
+			mosi_fifo_4 <= mosi_fifo_4 ;
+			mosi_fifo_5 <= mosi_fifo_5 ;
+			mosi_fifo_6 <= mosi_fifo_6 ;
+			mosi_fifo_7 <= mosi_fifo_7 ;
+			mosi_fifo_8 <= mosi_fifo_8 ;
+			mosi_fifo_9 <= mosi_fifo_9 ;
+			mosi_fifo_10 <= mosi_fifo_10 ;
+			mosi_fifo_11 <= mosi_fifo_11 ;
+			mosi_fifo_12 <= mosi_fifo_12 ;
+			mosi_fifo_13 <= mosi_fifo_13 ;
+			mosi_fifo_14 <= mosi_fifo_14 ;
+			mosi_fifo_15 <= mosi_fifo_15 ;
+			mosi_fifo_16 <= mosi_fifo_16 ;
+			mosi_fifo_17 <= mosi_fifo_17 ;
+			mosi_fifo_18 <= mosi_fifo_18 ;
+			mosi_fifo_19 <= mosi_fifo_19 ;
+			mosi_fifo_20 <= mosi_fifo_20 ;
+			mosi_fifo_21 <= mosi_fifo_21 ;
+			mosi_fifo_22 <= mosi_fifo_22 ;
+			mosi_fifo_23 <= mosi_fifo_23 ;
+			mosi_fifo_24 <= mosi_fifo_24 ;
+			mosi_fifo_25 <= mosi_fifo_25 ;
+			mosi_fifo_26 <= mosi_fifo_26 ;
+			mosi_fifo_27 <= mosi_fifo_27 ;
+			mosi_fifo_28 <= mosi_fifo_28 ;
+			mosi_fifo_29 <= mosi_fifo_29 ;
+			mosi_fifo_30 <= mosi_fifo_30 ;
+			mosi_fifo_31 <= mosi_fifo_31 ;
+			mosi_fifo_32 <= mosi_fifo_32 ;
+			mosi_fifo_33 <= mosi_fifo_33 ;
+			mosi_fifo_34 <= mosi_fifo_34 ;
+			mosi_fifo_35 <= mosi_fifo_35 ;
+			mosi_fifo_36 <= mosi_fifo_36 ;
+			mosi_fifo_37 <= mosi_fifo_37 ;
+			mosi_fifo_38 <= mosi_fifo_38 ;
+			mosi_fifo_39 <= mosi_fifo_39 ;
+			mosi_fifo_40 <= mosi_fifo_40 ;
+			mosi_fifo_41 <= mosi_fifo_41 ;
+			mosi_fifo_42 <= mosi_fifo_42 ;
+			mosi_fifo_43 <= mosi_fifo_43 ;
+			mosi_fifo_44 <= mosi_fifo_44 ;
+			mosi_fifo_45 <= mosi_fifo_45 ;
+			mosi_fifo_46 <= mosi_fifo_46 ;
+			mosi_fifo_47 <= mosi_fifo_47 ;
+			mosi_fifo_48 <= mosi_fifo_48 ;
+			mosi_fifo_49 <= mosi_fifo_49 ;
+			mosi_fifo_50 <= mosi_fifo_50 ;
+			mosi_fifo_51 <= mosi_fifo_51 ;
+			mosi_fifo_52 <= mosi_fifo_52 ;
+			mosi_fifo_53 <= mosi_fifo_53 ;
+			mosi_fifo_54 <= mosi_fifo_54 ;
+			mosi_fifo_55 <= mosi_fifo_55 ;
+			mosi_fifo_56 <= mosi_fifo_56 ;
+			mosi_fifo_57 <= mosi_fifo_57 ;
+			mosi_fifo_58 <= mosi_fifo_58 ;
+			mosi_fifo_59 <= mosi_fifo_59 ;
+			mosi_fifo_60 <= mosi_fifo_60 ;
+			mosi_fifo_61 <= mosi_fifo_61 ;
+			mosi_fifo_62 <= mosi_fifo_62 ;
+			mosi_fifo_63 <= mosi_fifo_63 ;
+		end
+		
+	end
+
+
+	//chip select logic
+	reg [16:0]chip_sel_r;
+	//user write control_b into reg
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			chip_sel_r <= 0;
+		end else if(wact && reg_waddr == SPI_CHIP_SEL_ADDR)begin
+			chip_sel_r <= reg_wr;
+		end else begin
+			chip_sel_r <= chip_sel_r;
+		end
+		
+	end
+	assign spi_chip_sel = ~chip_sel_r;
+
+	
+	
+	//SPI clock gen logic
+	reg [15:0]spi_clk_pscl;
+	reg [3:0]spi_clk_pscl_sel;
+	wire spi_clk_gen;
+	reg [2:0] spi_bit_stream_idx;
+	wire spi_load_next_byte;
+	assign spi_load_next_byte = &(spi_bit_stream_idx);// falling edge load
+
+	//user write control_b into reg
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_clk_pscl_sel <= 1;
+		end else if(wact && reg_waddr == SPI_CLK_SPCL_ADDR)begin
+			spi_clk_pscl_sel <= reg_wr[3:0];
+		end else begin
+			spi_clk_pscl_sel <= spi_clk_pscl_sel;
+		end
+		
+	end
+
+
+	assign spi_clk_gen =(spi_clk_pscl_sel == 4'h0)? axi_clk :
+						(spi_clk_pscl_sel == 4'h1)? spi_clk_pscl[0] :
+						(spi_clk_pscl_sel == 4'h2)? spi_clk_pscl[1] :
+						(spi_clk_pscl_sel == 4'h3)? spi_clk_pscl[2] :
+						(spi_clk_pscl_sel == 4'h4)? spi_clk_pscl[3] :
+						(spi_clk_pscl_sel == 4'h5)? spi_clk_pscl[4] :
+						(spi_clk_pscl_sel == 4'h6)? spi_clk_pscl[5] :
+						(spi_clk_pscl_sel == 4'h7)? spi_clk_pscl[6] :
+						(spi_clk_pscl_sel == 4'h8)? spi_clk_pscl[7] :
+						(spi_clk_pscl_sel == 4'h9)? spi_clk_pscl[8] :
+						(spi_clk_pscl_sel == 4'hA)? spi_clk_pscl[9] :
+						(spi_clk_pscl_sel == 4'hB)? spi_clk_pscl[10] :
+						(spi_clk_pscl_sel == 4'hC)? spi_clk_pscl[11] :
+						(spi_clk_pscl_sel == 4'hD)? spi_clk_pscl[12] :
+						(spi_clk_pscl_sel == 4'hE)? spi_clk_pscl[13] :
+						(spi_clk_pscl_sel == 4'hF)? spi_clk_pscl[14] : spi_clk_pscl[15];
+	/*
+	assign spi_clk_gen =(spi_clk_pscl_sel == 4'h0)? spi_clk_pscl[0] :
+						(spi_clk_pscl_sel == 4'h1)? spi_clk_pscl[1] :
+						(spi_clk_pscl_sel == 4'h2)? spi_clk_pscl[2] :
+						(spi_clk_pscl_sel == 4'h3)? spi_clk_pscl[3] :
+						(spi_clk_pscl_sel == 4'h4)? spi_clk_pscl[4] :
+						(spi_clk_pscl_sel == 4'h5)? spi_clk_pscl[5] :
+						(spi_clk_pscl_sel == 4'h6)? spi_clk_pscl[6] :
+						(spi_clk_pscl_sel == 4'h7)? spi_clk_pscl[7] :
+						(spi_clk_pscl_sel == 4'h8)? spi_clk_pscl[8] :
+						(spi_clk_pscl_sel == 4'h9)? spi_clk_pscl[9] :
+						(spi_clk_pscl_sel == 4'hA)? spi_clk_pscl[10] :
+						(spi_clk_pscl_sel == 4'hB)? spi_clk_pscl[11] :
+						(spi_clk_pscl_sel == 4'hC)? spi_clk_pscl[12] :
+						(spi_clk_pscl_sel == 4'hD)? spi_clk_pscl[13] :
+						(spi_clk_pscl_sel == 4'hE)? spi_clk_pscl[14] : spi_clk_pscl[15];
+	*/
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_clk_pscl <= 16'b0;
+		end else begin
+			spi_clk_pscl <= spi_clk_pscl + 1;
+		end
+		
+	end
+
+	reg mosi_empty_gate;
+	always @(negedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			mosi_empty_gate <= 1'b0;
+		end else if(~spi_clk_gen) begin
+			mosi_empty_gate <= mosi_empty;
+		end else begin
+			mosi_empty_gate <= mosi_empty_gate;
+		end
+	end
+
+	always @(negedge spi_clk_gen or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_bit_stream_idx <= 3'b0;
+		end else if(~mosi_empty_gate)begin
+			spi_bit_stream_idx <= spi_bit_stream_idx + 1;
+		end else begin
+			spi_bit_stream_idx <= 3'b0;
+		end
+	end
+
+	//mosi generate by muxing from mosi_buffer.
+	wire [7:0] spi_tx_byte;
+
+	assign spi_tx_byte =	( mosi_fifo_pop_ptr == 7'd0) ? mosi_fifo_0 :
+							( mosi_fifo_pop_ptr == 7'd1) ? mosi_fifo_1 :
+							( mosi_fifo_pop_ptr == 7'd2) ? mosi_fifo_2 :
+							( mosi_fifo_pop_ptr == 7'd3) ? mosi_fifo_3 :
+							( mosi_fifo_pop_ptr == 7'd4) ? mosi_fifo_4 :
+							( mosi_fifo_pop_ptr == 7'd5) ? mosi_fifo_5 :
+							( mosi_fifo_pop_ptr == 7'd6) ? mosi_fifo_6 :
+							( mosi_fifo_pop_ptr == 7'd7) ? mosi_fifo_7 :
+							( mosi_fifo_pop_ptr == 7'd8) ? mosi_fifo_8 :
+							( mosi_fifo_pop_ptr == 7'd9) ? mosi_fifo_9 :
+							( mosi_fifo_pop_ptr == 7'd10) ? mosi_fifo_10 :
+							( mosi_fifo_pop_ptr == 7'd11) ? mosi_fifo_11 :
+							( mosi_fifo_pop_ptr == 7'd12) ? mosi_fifo_12 :
+							( mosi_fifo_pop_ptr == 7'd13) ? mosi_fifo_13 :
+							( mosi_fifo_pop_ptr == 7'd14) ? mosi_fifo_14 :
+							( mosi_fifo_pop_ptr == 7'd15) ? mosi_fifo_15 :
+							( mosi_fifo_pop_ptr == 7'd16) ? mosi_fifo_16 :
+							( mosi_fifo_pop_ptr == 7'd17) ? mosi_fifo_17 :
+							( mosi_fifo_pop_ptr == 7'd18) ? mosi_fifo_18 :
+							( mosi_fifo_pop_ptr == 7'd19) ? mosi_fifo_19 :
+							( mosi_fifo_pop_ptr == 7'd20) ? mosi_fifo_20 :
+							( mosi_fifo_pop_ptr == 7'd21) ? mosi_fifo_21 :
+							( mosi_fifo_pop_ptr == 7'd22) ? mosi_fifo_22 :
+							( mosi_fifo_pop_ptr == 7'd23) ? mosi_fifo_23 :
+							( mosi_fifo_pop_ptr == 7'd24) ? mosi_fifo_24 :
+							( mosi_fifo_pop_ptr == 7'd25) ? mosi_fifo_25 :
+							( mosi_fifo_pop_ptr == 7'd26) ? mosi_fifo_26 :
+							( mosi_fifo_pop_ptr == 7'd27) ? mosi_fifo_27 :
+							( mosi_fifo_pop_ptr == 7'd28) ? mosi_fifo_28 :
+							( mosi_fifo_pop_ptr == 7'd29) ? mosi_fifo_29 :
+							( mosi_fifo_pop_ptr == 7'd30) ? mosi_fifo_30 :
+							( mosi_fifo_pop_ptr == 7'd31) ? mosi_fifo_31 :
+							( mosi_fifo_pop_ptr == 7'd32) ? mosi_fifo_32 :
+							( mosi_fifo_pop_ptr == 7'd33) ? mosi_fifo_33 :
+							( mosi_fifo_pop_ptr == 7'd34) ? mosi_fifo_34 :
+							( mosi_fifo_pop_ptr == 7'd35) ? mosi_fifo_35 :
+							( mosi_fifo_pop_ptr == 7'd36) ? mosi_fifo_36 :
+							( mosi_fifo_pop_ptr == 7'd37) ? mosi_fifo_37 :
+							( mosi_fifo_pop_ptr == 7'd38) ? mosi_fifo_38 :
+							( mosi_fifo_pop_ptr == 7'd39) ? mosi_fifo_39 :
+							( mosi_fifo_pop_ptr == 7'd40) ? mosi_fifo_40 :
+							( mosi_fifo_pop_ptr == 7'd41) ? mosi_fifo_41 :
+							( mosi_fifo_pop_ptr == 7'd42) ? mosi_fifo_42 :
+							( mosi_fifo_pop_ptr == 7'd43) ? mosi_fifo_43 :
+							( mosi_fifo_pop_ptr == 7'd44) ? mosi_fifo_44 :
+							( mosi_fifo_pop_ptr == 7'd45) ? mosi_fifo_45 :
+							( mosi_fifo_pop_ptr == 7'd46) ? mosi_fifo_46 :
+							( mosi_fifo_pop_ptr == 7'd47) ? mosi_fifo_47 :
+							( mosi_fifo_pop_ptr == 7'd48) ? mosi_fifo_48 :
+							( mosi_fifo_pop_ptr == 7'd49) ? mosi_fifo_49 :
+							( mosi_fifo_pop_ptr == 7'd50) ? mosi_fifo_50 :
+							( mosi_fifo_pop_ptr == 7'd51) ? mosi_fifo_51 :
+							( mosi_fifo_pop_ptr == 7'd52) ? mosi_fifo_52 :
+							( mosi_fifo_pop_ptr == 7'd53) ? mosi_fifo_53 :
+							( mosi_fifo_pop_ptr == 7'd54) ? mosi_fifo_54 :
+							( mosi_fifo_pop_ptr == 7'd55) ? mosi_fifo_55 :
+							( mosi_fifo_pop_ptr == 7'd56) ? mosi_fifo_56 :
+							( mosi_fifo_pop_ptr == 7'd57) ? mosi_fifo_57 :
+							( mosi_fifo_pop_ptr == 7'd58) ? mosi_fifo_58 :
+							( mosi_fifo_pop_ptr == 7'd59) ? mosi_fifo_59 :
+							( mosi_fifo_pop_ptr == 7'd60) ? mosi_fifo_60 :
+							( mosi_fifo_pop_ptr == 7'd61) ? mosi_fifo_61 :
+							( mosi_fifo_pop_ptr == 7'd62) ? mosi_fifo_62 :
+							( mosi_fifo_pop_ptr == 7'd63) ? mosi_fifo_63 : mosi_fifo_64;
+	
+	
+	assign spi_mosi = (spi_bit_stream_idx == 3'h0)? spi_tx_byte[7] :
+						(spi_bit_stream_idx == 3'h1)? spi_tx_byte[6] :
+						(spi_bit_stream_idx == 3'h2)? spi_tx_byte[5] :
+						(spi_bit_stream_idx == 3'h3)? spi_tx_byte[4] :
+						(spi_bit_stream_idx == 3'h4)? spi_tx_byte[3] :
+						(spi_bit_stream_idx == 3'h5)? spi_tx_byte[2] :
+						(spi_bit_stream_idx == 3'h6)? spi_tx_byte[1] :spi_tx_byte[0];
+
+	//external spi_clk gating
+	assign spi_clk = ~mosi_empty_gate & spi_clk_gen;
+	assign spi_clk_gen_out = spi_clk_gen;
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8===================                                             ==================D
+*8=================    MISO SECTION    HANDLE 4 INPUT BIT STREAM    ================D
+*8===================                                             ==================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+
+
+	//miso fifo counter
+	reg [6:0]miso_fifo_psh_ptr;
+	reg [6:0]miso_fifo_pop_ptr;
+	
+	wire [6:0]miso_fifo_psh_ptr_nxt;
+	assign miso_fifo_psh_ptr_nxt = (&{miso_fifo_psh_ptr[6],~miso_fifo_psh_ptr[6 - 1:0]})? 0 : miso_fifo_psh_ptr + 1;
+
+	wire [6:0]miso_fifo_pop_ptr_nxt;
+	assign miso_fifo_pop_ptr_nxt = (&{miso_fifo_pop_ptr[6],~miso_fifo_pop_ptr[6 - 1:0]})? 0 : miso_fifo_pop_ptr + 1;
+
+	wire miso_empty;
+	assign miso_empty = ~|(miso_fifo_psh_ptr ^ miso_fifo_pop_ptr);
+	wire miso_full;
+	assign miso_full = ~|(miso_fifo_psh_ptr_nxt ^ miso_fifo_pop_ptr);
+
+	//user pop byte counter
+	always @(posedge axi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			miso_fifo_pop_ptr <= 0;
+		end else if(ract && reg_raddr == RX_FIFO_ADDR && ~miso_empty)begin
+			miso_fifo_pop_ptr <= miso_fifo_pop_ptr_nxt;
+		end else begin
+			miso_fifo_pop_ptr <= miso_fifo_pop_ptr;
+		end
+		
+	end
+
+	//host push byte counter
+
+	always @(negedge spi_load_next_byte or negedge rst_n) begin
+		if(~rst_n)begin
+			miso_fifo_psh_ptr <= 0;
+		end else if(~miso_full)begin
+			miso_fifo_psh_ptr <= miso_fifo_psh_ptr_nxt;
+		end else begin
+			miso_fifo_psh_ptr <= miso_fifo_psh_ptr;
+		end
+		
+	end
+
+	
+	//miso fifo block
+	reg [7:0]miso_fifo_0;
+	reg [7:0]miso_fifo_1;
+	reg [7:0]miso_fifo_2;
+	reg [7:0]miso_fifo_3;
+	reg [7:0]miso_fifo_4;
+	reg [7:0]miso_fifo_5;
+	reg [7:0]miso_fifo_6;
+	reg [7:0]miso_fifo_7;
+	reg [7:0]miso_fifo_8;
+	reg [7:0]miso_fifo_9;
+	reg [7:0]miso_fifo_10;
+	reg [7:0]miso_fifo_11;
+	reg [7:0]miso_fifo_12;
+	reg [7:0]miso_fifo_13;
+	reg [7:0]miso_fifo_14;
+	reg [7:0]miso_fifo_15;
+	reg [7:0]miso_fifo_16;
+	reg [7:0]miso_fifo_17;
+	reg [7:0]miso_fifo_18;
+	reg [7:0]miso_fifo_19;
+	reg [7:0]miso_fifo_20;
+	reg [7:0]miso_fifo_21;
+	reg [7:0]miso_fifo_22;
+	reg [7:0]miso_fifo_23;
+	reg [7:0]miso_fifo_24;
+	reg [7:0]miso_fifo_25;
+	reg [7:0]miso_fifo_26;
+	reg [7:0]miso_fifo_27;
+	reg [7:0]miso_fifo_28;
+	reg [7:0]miso_fifo_29;
+	reg [7:0]miso_fifo_30;
+	reg [7:0]miso_fifo_31;
+	reg [7:0]miso_fifo_32;
+	reg [7:0]miso_fifo_33;
+	reg [7:0]miso_fifo_34;
+	reg [7:0]miso_fifo_35;
+	reg [7:0]miso_fifo_36;
+	reg [7:0]miso_fifo_37;
+	reg [7:0]miso_fifo_38;
+	reg [7:0]miso_fifo_39;
+	reg [7:0]miso_fifo_40;
+	reg [7:0]miso_fifo_41;
+	reg [7:0]miso_fifo_42;
+	reg [7:0]miso_fifo_43;
+	reg [7:0]miso_fifo_44;
+	reg [7:0]miso_fifo_45;
+	reg [7:0]miso_fifo_46;
+	reg [7:0]miso_fifo_47;
+	reg [7:0]miso_fifo_48;
+	reg [7:0]miso_fifo_49;
+	reg [7:0]miso_fifo_50;
+	reg [7:0]miso_fifo_51;
+	reg [7:0]miso_fifo_52;
+	reg [7:0]miso_fifo_53;
+	reg [7:0]miso_fifo_54;
+	reg [7:0]miso_fifo_55;
+	reg [7:0]miso_fifo_56;
+	reg [7:0]miso_fifo_57;
+	reg [7:0]miso_fifo_58;
+	reg [7:0]miso_fifo_59;
+	reg [7:0]miso_fifo_60;
+	reg [7:0]miso_fifo_61;
+	reg [7:0]miso_fifo_62;
+	reg [7:0]miso_fifo_63;
+	reg [7:0]miso_fifo_64;
+
+
+
+	always @ (negedge spi_load_next_byte or negedge rst_n) begin
+		if(~rst_n) begin
+			miso_fifo_0 <= 8'h0;
+			miso_fifo_1 <= 8'h0;
+			miso_fifo_2 <= 8'h0;
+			miso_fifo_3 <= 8'h0;
+			miso_fifo_4 <= 8'h0;
+			miso_fifo_5 <= 8'h0;
+			miso_fifo_6 <= 8'h0;
+			miso_fifo_7 <= 8'h0;
+			miso_fifo_8 <= 8'h0;
+			miso_fifo_9 <= 8'h0;
+			miso_fifo_10 <= 8'h0;
+			miso_fifo_11 <= 8'h0;
+			miso_fifo_12 <= 8'h0;
+			miso_fifo_13 <= 8'h0;
+			miso_fifo_14 <= 8'h0;
+			miso_fifo_15 <= 8'h0;
+			miso_fifo_16 <= 8'h0;
+			miso_fifo_17 <= 8'h0;
+			miso_fifo_18 <= 8'h0;
+			miso_fifo_19 <= 8'h0;
+			miso_fifo_20 <= 8'h0;
+			miso_fifo_21 <= 8'h0;
+			miso_fifo_22 <= 8'h0;
+			miso_fifo_23 <= 8'h0;
+			miso_fifo_24 <= 8'h0;
+			miso_fifo_25 <= 8'h0;
+			miso_fifo_26 <= 8'h0;
+			miso_fifo_27 <= 8'h0;
+			miso_fifo_28 <= 8'h0;
+			miso_fifo_29 <= 8'h0;
+			miso_fifo_30 <= 8'h0;
+			miso_fifo_31 <= 8'h0;
+			miso_fifo_32 <= 8'h0;
+			miso_fifo_33 <= 8'h0;
+			miso_fifo_34 <= 8'h0;
+			miso_fifo_35 <= 8'h0;
+			miso_fifo_36 <= 8'h0;
+			miso_fifo_37 <= 8'h0;
+			miso_fifo_38 <= 8'h0;
+			miso_fifo_39 <= 8'h0;
+			miso_fifo_40 <= 8'h0;
+			miso_fifo_41 <= 8'h0;
+			miso_fifo_42 <= 8'h0;
+			miso_fifo_43 <= 8'h0;
+			miso_fifo_44 <= 8'h0;
+			miso_fifo_45 <= 8'h0;
+			miso_fifo_46 <= 8'h0;
+			miso_fifo_47 <= 8'h0;
+			miso_fifo_48 <= 8'h0;
+			miso_fifo_49 <= 8'h0;
+			miso_fifo_50 <= 8'h0;
+			miso_fifo_51 <= 8'h0;
+			miso_fifo_52 <= 8'h0;
+			miso_fifo_53 <= 8'h0;
+			miso_fifo_54 <= 8'h0;
+			miso_fifo_55 <= 8'h0;
+			miso_fifo_56 <= 8'h0;
+			miso_fifo_57 <= 8'h0;
+			miso_fifo_58 <= 8'h0;
+			miso_fifo_59 <= 8'h0;
+			miso_fifo_60 <= 8'h0;
+			miso_fifo_61 <= 8'h0;
+			miso_fifo_62 <= 8'h0;
+			miso_fifo_63 <= 8'h0;
+		end else if(~miso_full) begin
+			miso_fifo_0 <= (miso_fifo_psh_ptr == 7'd0) ? spi_rx_shift : miso_fifo_0 ;
+			miso_fifo_1 <= (miso_fifo_psh_ptr == 7'd1) ? spi_rx_shift : miso_fifo_1 ;
+			miso_fifo_2 <= (miso_fifo_psh_ptr == 7'd2) ? spi_rx_shift : miso_fifo_2 ;
+			miso_fifo_3 <= (miso_fifo_psh_ptr == 7'd3) ? spi_rx_shift : miso_fifo_3 ;
+			miso_fifo_4 <= (miso_fifo_psh_ptr == 7'd4) ? spi_rx_shift : miso_fifo_4 ;
+			miso_fifo_5 <= (miso_fifo_psh_ptr == 7'd5) ? spi_rx_shift : miso_fifo_5 ;
+			miso_fifo_6 <= (miso_fifo_psh_ptr == 7'd6) ? spi_rx_shift : miso_fifo_6 ;
+			miso_fifo_7 <= (miso_fifo_psh_ptr == 7'd7) ? spi_rx_shift : miso_fifo_7 ;
+			miso_fifo_8 <= (miso_fifo_psh_ptr == 7'd8) ? spi_rx_shift : miso_fifo_8 ;
+			miso_fifo_9 <= (miso_fifo_psh_ptr == 7'd9) ? spi_rx_shift : miso_fifo_9 ;
+			miso_fifo_10 <= (miso_fifo_psh_ptr == 7'd10) ? spi_rx_shift : miso_fifo_10 ;
+			miso_fifo_11 <= (miso_fifo_psh_ptr == 7'd11) ? spi_rx_shift : miso_fifo_11 ;
+			miso_fifo_12 <= (miso_fifo_psh_ptr == 7'd12) ? spi_rx_shift : miso_fifo_12 ;
+			miso_fifo_13 <= (miso_fifo_psh_ptr == 7'd13) ? spi_rx_shift : miso_fifo_13 ;
+			miso_fifo_14 <= (miso_fifo_psh_ptr == 7'd14) ? spi_rx_shift : miso_fifo_14 ;
+			miso_fifo_15 <= (miso_fifo_psh_ptr == 7'd15) ? spi_rx_shift : miso_fifo_15 ;
+			miso_fifo_16 <= (miso_fifo_psh_ptr == 7'd16) ? spi_rx_shift : miso_fifo_16 ;
+			miso_fifo_17 <= (miso_fifo_psh_ptr == 7'd17) ? spi_rx_shift : miso_fifo_17 ;
+			miso_fifo_18 <= (miso_fifo_psh_ptr == 7'd18) ? spi_rx_shift : miso_fifo_18 ;
+			miso_fifo_19 <= (miso_fifo_psh_ptr == 7'd19) ? spi_rx_shift : miso_fifo_19 ;
+			miso_fifo_20 <= (miso_fifo_psh_ptr == 7'd20) ? spi_rx_shift : miso_fifo_20 ;
+			miso_fifo_21 <= (miso_fifo_psh_ptr == 7'd21) ? spi_rx_shift : miso_fifo_21 ;
+			miso_fifo_22 <= (miso_fifo_psh_ptr == 7'd22) ? spi_rx_shift : miso_fifo_22 ;
+			miso_fifo_23 <= (miso_fifo_psh_ptr == 7'd23) ? spi_rx_shift : miso_fifo_23 ;
+			miso_fifo_24 <= (miso_fifo_psh_ptr == 7'd24) ? spi_rx_shift : miso_fifo_24 ;
+			miso_fifo_25 <= (miso_fifo_psh_ptr == 7'd25) ? spi_rx_shift : miso_fifo_25 ;
+			miso_fifo_26 <= (miso_fifo_psh_ptr == 7'd26) ? spi_rx_shift : miso_fifo_26 ;
+			miso_fifo_27 <= (miso_fifo_psh_ptr == 7'd27) ? spi_rx_shift : miso_fifo_27 ;
+			miso_fifo_28 <= (miso_fifo_psh_ptr == 7'd28) ? spi_rx_shift : miso_fifo_28 ;
+			miso_fifo_29 <= (miso_fifo_psh_ptr == 7'd29) ? spi_rx_shift : miso_fifo_29 ;
+			miso_fifo_30 <= (miso_fifo_psh_ptr == 7'd30) ? spi_rx_shift : miso_fifo_30 ;
+			miso_fifo_31 <= (miso_fifo_psh_ptr == 7'd31) ? spi_rx_shift : miso_fifo_31 ;
+			miso_fifo_32 <= (miso_fifo_psh_ptr == 7'd32) ? spi_rx_shift : miso_fifo_32 ;
+			miso_fifo_33 <= (miso_fifo_psh_ptr == 7'd33) ? spi_rx_shift : miso_fifo_33 ;
+			miso_fifo_34 <= (miso_fifo_psh_ptr == 7'd34) ? spi_rx_shift : miso_fifo_34 ;
+			miso_fifo_35 <= (miso_fifo_psh_ptr == 7'd35) ? spi_rx_shift : miso_fifo_35 ;
+			miso_fifo_36 <= (miso_fifo_psh_ptr == 7'd36) ? spi_rx_shift : miso_fifo_36 ;
+			miso_fifo_37 <= (miso_fifo_psh_ptr == 7'd37) ? spi_rx_shift : miso_fifo_37 ;
+			miso_fifo_38 <= (miso_fifo_psh_ptr == 7'd38) ? spi_rx_shift : miso_fifo_38 ;
+			miso_fifo_39 <= (miso_fifo_psh_ptr == 7'd39) ? spi_rx_shift : miso_fifo_39 ;
+			miso_fifo_40 <= (miso_fifo_psh_ptr == 7'd40) ? spi_rx_shift : miso_fifo_40 ;
+			miso_fifo_41 <= (miso_fifo_psh_ptr == 7'd41) ? spi_rx_shift : miso_fifo_41 ;
+			miso_fifo_42 <= (miso_fifo_psh_ptr == 7'd42) ? spi_rx_shift : miso_fifo_42 ;
+			miso_fifo_43 <= (miso_fifo_psh_ptr == 7'd43) ? spi_rx_shift : miso_fifo_43 ;
+			miso_fifo_44 <= (miso_fifo_psh_ptr == 7'd44) ? spi_rx_shift : miso_fifo_44 ;
+			miso_fifo_45 <= (miso_fifo_psh_ptr == 7'd45) ? spi_rx_shift : miso_fifo_45 ;
+			miso_fifo_46 <= (miso_fifo_psh_ptr == 7'd46) ? spi_rx_shift : miso_fifo_46 ;
+			miso_fifo_47 <= (miso_fifo_psh_ptr == 7'd47) ? spi_rx_shift : miso_fifo_47 ;
+			miso_fifo_48 <= (miso_fifo_psh_ptr == 7'd48) ? spi_rx_shift : miso_fifo_48 ;
+			miso_fifo_49 <= (miso_fifo_psh_ptr == 7'd49) ? spi_rx_shift : miso_fifo_49 ;
+			miso_fifo_50 <= (miso_fifo_psh_ptr == 7'd50) ? spi_rx_shift : miso_fifo_50 ;
+			miso_fifo_51 <= (miso_fifo_psh_ptr == 7'd51) ? spi_rx_shift : miso_fifo_51 ;
+			miso_fifo_52 <= (miso_fifo_psh_ptr == 7'd52) ? spi_rx_shift : miso_fifo_52 ;
+			miso_fifo_53 <= (miso_fifo_psh_ptr == 7'd53) ? spi_rx_shift : miso_fifo_53 ;
+			miso_fifo_54 <= (miso_fifo_psh_ptr == 7'd54) ? spi_rx_shift : miso_fifo_54 ;
+			miso_fifo_55 <= (miso_fifo_psh_ptr == 7'd55) ? spi_rx_shift : miso_fifo_55 ;
+			miso_fifo_56 <= (miso_fifo_psh_ptr == 7'd56) ? spi_rx_shift : miso_fifo_56 ;
+			miso_fifo_57 <= (miso_fifo_psh_ptr == 7'd57) ? spi_rx_shift : miso_fifo_57 ;
+			miso_fifo_58 <= (miso_fifo_psh_ptr == 7'd58) ? spi_rx_shift : miso_fifo_58 ;
+			miso_fifo_59 <= (miso_fifo_psh_ptr == 7'd59) ? spi_rx_shift : miso_fifo_59 ;
+			miso_fifo_60 <= (miso_fifo_psh_ptr == 7'd60) ? spi_rx_shift : miso_fifo_60 ;
+			miso_fifo_61 <= (miso_fifo_psh_ptr == 7'd61) ? spi_rx_shift : miso_fifo_61 ;
+			miso_fifo_62 <= (miso_fifo_psh_ptr == 7'd62) ? spi_rx_shift : miso_fifo_62 ;
+			miso_fifo_63 <= (miso_fifo_psh_ptr == 7'd63) ? spi_rx_shift : miso_fifo_63 ;
+		end else begin
+			miso_fifo_0 <= miso_fifo_0 ;
+			miso_fifo_1 <= miso_fifo_1 ;
+			miso_fifo_2 <= miso_fifo_2 ;
+			miso_fifo_3 <= miso_fifo_3 ;
+			miso_fifo_4 <= miso_fifo_4 ;
+			miso_fifo_5 <= miso_fifo_5 ;
+			miso_fifo_6 <= miso_fifo_6 ;
+			miso_fifo_7 <= miso_fifo_7 ;
+			miso_fifo_8 <= miso_fifo_8 ;
+			miso_fifo_9 <= miso_fifo_9 ;
+			miso_fifo_10 <= miso_fifo_10 ;
+			miso_fifo_11 <= miso_fifo_11 ;
+			miso_fifo_12 <= miso_fifo_12 ;
+			miso_fifo_13 <= miso_fifo_13 ;
+			miso_fifo_14 <= miso_fifo_14 ;
+			miso_fifo_15 <= miso_fifo_15 ;
+			miso_fifo_16 <= miso_fifo_16 ;
+			miso_fifo_17 <= miso_fifo_17 ;
+			miso_fifo_18 <= miso_fifo_18 ;
+			miso_fifo_19 <= miso_fifo_19 ;
+			miso_fifo_20 <= miso_fifo_20 ;
+			miso_fifo_21 <= miso_fifo_21 ;
+			miso_fifo_22 <= miso_fifo_22 ;
+			miso_fifo_23 <= miso_fifo_23 ;
+			miso_fifo_24 <= miso_fifo_24 ;
+			miso_fifo_25 <= miso_fifo_25 ;
+			miso_fifo_26 <= miso_fifo_26 ;
+			miso_fifo_27 <= miso_fifo_27 ;
+			miso_fifo_28 <= miso_fifo_28 ;
+			miso_fifo_29 <= miso_fifo_29 ;
+			miso_fifo_30 <= miso_fifo_30 ;
+			miso_fifo_31 <= miso_fifo_31 ;
+			miso_fifo_32 <= miso_fifo_32 ;
+			miso_fifo_33 <= miso_fifo_33 ;
+			miso_fifo_34 <= miso_fifo_34 ;
+			miso_fifo_35 <= miso_fifo_35 ;
+			miso_fifo_36 <= miso_fifo_36 ;
+			miso_fifo_37 <= miso_fifo_37 ;
+			miso_fifo_38 <= miso_fifo_38 ;
+			miso_fifo_39 <= miso_fifo_39 ;
+			miso_fifo_40 <= miso_fifo_40 ;
+			miso_fifo_41 <= miso_fifo_41 ;
+			miso_fifo_42 <= miso_fifo_42 ;
+			miso_fifo_43 <= miso_fifo_43 ;
+			miso_fifo_44 <= miso_fifo_44 ;
+			miso_fifo_45 <= miso_fifo_45 ;
+			miso_fifo_46 <= miso_fifo_46 ;
+			miso_fifo_47 <= miso_fifo_47 ;
+			miso_fifo_48 <= miso_fifo_48 ;
+			miso_fifo_49 <= miso_fifo_49 ;
+			miso_fifo_50 <= miso_fifo_50 ;
+			miso_fifo_51 <= miso_fifo_51 ;
+			miso_fifo_52 <= miso_fifo_52 ;
+			miso_fifo_53 <= miso_fifo_53 ;
+			miso_fifo_54 <= miso_fifo_54 ;
+			miso_fifo_55 <= miso_fifo_55 ;
+			miso_fifo_56 <= miso_fifo_56 ;
+			miso_fifo_57 <= miso_fifo_57 ;
+			miso_fifo_58 <= miso_fifo_58 ;
+			miso_fifo_59 <= miso_fifo_59 ;
+			miso_fifo_60 <= miso_fifo_60 ;
+			miso_fifo_61 <= miso_fifo_61 ;
+			miso_fifo_62 <= miso_fifo_62 ;
+			miso_fifo_63 <= miso_fifo_63 ;
+		end
+		
+	end
+
+	//spi_miso bit stream shift in block
+	reg [7:0]spi_rx_shift;
+	always @(posedge spi_clk or negedge rst_n) begin
+		if(~rst_n)begin
+			spi_rx_shift <= 0;
+		end else begin
+			spi_rx_shift <= {spi_rx_shift[6:0],spi_miso};
+		end
+		
+	end
+
+	//miso_fifo_read_head_probe
+	wire [7:0]spi_rx_byte;
+	assign spi_rx_byte =	( miso_fifo_pop_ptr == 7'd0) ? miso_fifo_0 :
+							( miso_fifo_pop_ptr == 7'd1) ? miso_fifo_1 :
+							( miso_fifo_pop_ptr == 7'd2) ? miso_fifo_2 :
+							( miso_fifo_pop_ptr == 7'd3) ? miso_fifo_3 :
+							( miso_fifo_pop_ptr == 7'd4) ? miso_fifo_4 :
+							( miso_fifo_pop_ptr == 7'd5) ? miso_fifo_5 :
+							( miso_fifo_pop_ptr == 7'd6) ? miso_fifo_6 :
+							( miso_fifo_pop_ptr == 7'd7) ? miso_fifo_7 :
+							( miso_fifo_pop_ptr == 7'd8) ? miso_fifo_8 :
+							( miso_fifo_pop_ptr == 7'd9) ? miso_fifo_9 :
+							( miso_fifo_pop_ptr == 7'd10) ? miso_fifo_10 :
+							( miso_fifo_pop_ptr == 7'd11) ? miso_fifo_11 :
+							( miso_fifo_pop_ptr == 7'd12) ? miso_fifo_12 :
+							( miso_fifo_pop_ptr == 7'd13) ? miso_fifo_13 :
+							( miso_fifo_pop_ptr == 7'd14) ? miso_fifo_14 :
+							( miso_fifo_pop_ptr == 7'd15) ? miso_fifo_15 :
+							( miso_fifo_pop_ptr == 7'd16) ? miso_fifo_16 :
+							( miso_fifo_pop_ptr == 7'd17) ? miso_fifo_17 :
+							( miso_fifo_pop_ptr == 7'd18) ? miso_fifo_18 :
+							( miso_fifo_pop_ptr == 7'd19) ? miso_fifo_19 :
+							( miso_fifo_pop_ptr == 7'd20) ? miso_fifo_20 :
+							( miso_fifo_pop_ptr == 7'd21) ? miso_fifo_21 :
+							( miso_fifo_pop_ptr == 7'd22) ? miso_fifo_22 :
+							( miso_fifo_pop_ptr == 7'd23) ? miso_fifo_23 :
+							( miso_fifo_pop_ptr == 7'd24) ? miso_fifo_24 :
+							( miso_fifo_pop_ptr == 7'd25) ? miso_fifo_25 :
+							( miso_fifo_pop_ptr == 7'd26) ? miso_fifo_26 :
+							( miso_fifo_pop_ptr == 7'd27) ? miso_fifo_27 :
+							( miso_fifo_pop_ptr == 7'd28) ? miso_fifo_28 :
+							( miso_fifo_pop_ptr == 7'd29) ? miso_fifo_29 :
+							( miso_fifo_pop_ptr == 7'd30) ? miso_fifo_30 :
+							( miso_fifo_pop_ptr == 7'd31) ? miso_fifo_31 :
+							( miso_fifo_pop_ptr == 7'd32) ? miso_fifo_32 :
+							( miso_fifo_pop_ptr == 7'd33) ? miso_fifo_33 :
+							( miso_fifo_pop_ptr == 7'd34) ? miso_fifo_34 :
+							( miso_fifo_pop_ptr == 7'd35) ? miso_fifo_35 :
+							( miso_fifo_pop_ptr == 7'd36) ? miso_fifo_36 :
+							( miso_fifo_pop_ptr == 7'd37) ? miso_fifo_37 :
+							( miso_fifo_pop_ptr == 7'd38) ? miso_fifo_38 :
+							( miso_fifo_pop_ptr == 7'd39) ? miso_fifo_39 :
+							( miso_fifo_pop_ptr == 7'd40) ? miso_fifo_40 :
+							( miso_fifo_pop_ptr == 7'd41) ? miso_fifo_41 :
+							( miso_fifo_pop_ptr == 7'd42) ? miso_fifo_42 :
+							( miso_fifo_pop_ptr == 7'd43) ? miso_fifo_43 :
+							( miso_fifo_pop_ptr == 7'd44) ? miso_fifo_44 :
+							( miso_fifo_pop_ptr == 7'd45) ? miso_fifo_45 :
+							( miso_fifo_pop_ptr == 7'd46) ? miso_fifo_46 :
+							( miso_fifo_pop_ptr == 7'd47) ? miso_fifo_47 :
+							( miso_fifo_pop_ptr == 7'd48) ? miso_fifo_48 :
+							( miso_fifo_pop_ptr == 7'd49) ? miso_fifo_49 :
+							( miso_fifo_pop_ptr == 7'd50) ? miso_fifo_50 :
+							( miso_fifo_pop_ptr == 7'd51) ? miso_fifo_51 :
+							( miso_fifo_pop_ptr == 7'd52) ? miso_fifo_52 :
+							( miso_fifo_pop_ptr == 7'd53) ? miso_fifo_53 :
+							( miso_fifo_pop_ptr == 7'd54) ? miso_fifo_54 :
+							( miso_fifo_pop_ptr == 7'd55) ? miso_fifo_55 :
+							( miso_fifo_pop_ptr == 7'd56) ? miso_fifo_56 :
+							( miso_fifo_pop_ptr == 7'd57) ? miso_fifo_57 :
+							( miso_fifo_pop_ptr == 7'd58) ? miso_fifo_58 :
+							( miso_fifo_pop_ptr == 7'd59) ? miso_fifo_59 :
+							( miso_fifo_pop_ptr == 7'd60) ? miso_fifo_60 :
+							( miso_fifo_pop_ptr == 7'd61) ? miso_fifo_61 :
+							( miso_fifo_pop_ptr == 7'd62) ? miso_fifo_62 :
+							( miso_fifo_pop_ptr == 7'd63) ? miso_fifo_63 : miso_fifo_64;
+	
+
+
+
+/**
+*8==================================================================================D
+*8==================================================================================D
+*8======================                                       =====================D
+*8====================    TO SYSTEM MM INTERFACE OUTPUT DRIVE    ===================D
+*8======================                                       =====================D
+*8==================================================================================D
+*8==================================================================================D
+*/
+
+assign reg_rd = ( reg_raddr == TX_FIFO_ADDR) ? {8'h00,spi_rx_byte} : 	//read current transmitting byte *mosi_fifo_pop_ptr
+				( reg_raddr == SPI_CHIP_SEL_ADDR) ? {chip_sel_r} :		//read chip sel reg
+				( reg_raddr == OP_STATUS_ADDR) ? {12'h000,miso_full,~miso_empty,mosi_full,~mosi_empty} :	//read status reg
+				( reg_raddr == SPI_CLK_SPCL_ADDR) ? {12'h000,spi_clk_pscl_sel}: //read clk prescaler select
+				8'h55;
+	
+endmodule
